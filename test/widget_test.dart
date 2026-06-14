@@ -23,6 +23,18 @@ class _NoopBackend implements ClearSplitApi {
   Future<AppData> syncGroup(String groupId, String requesterId) async =>
       throw BackendClientException('offline');
   @override
+  Future<AppData> addGroupMember(String g, String r, Member m) async =>
+      throw BackendClientException('offline');
+  @override
+  Future<AppData> removeGroupMember(String g, String r, String id) async =>
+      throw BackendClientException('offline');
+  @override
+  Future<AppData> assignGroupAdmin(String g, String r, String id) async =>
+      throw BackendClientException('offline');
+  @override
+  Future<AppData> revokeGroupAdmin(String g, String r, String id) async =>
+      throw BackendClientException('offline');
+  @override
   Future<void> logout() async {}
   @override
   Future<AppData> saveState(String userId, AppData state) async => state;

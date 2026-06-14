@@ -31,6 +31,42 @@ class _FakeBackend implements ClearSplitApi {
   Future<AppData> syncGroup(String groupId, String requesterId) async => _state;
 
   @override
+  Future<AppData> addGroupMember(
+      String groupId, String requesterId, Member member) async {
+    final g = _state.groupById(groupId);
+    if (g != null && !g.members.contains(member.id)) g.members.add(member.id);
+    if (!_state.people.any((p) => p.id == member.id)) {
+      _state.people.add(member.toPerson());
+    }
+    return _state;
+  }
+
+  @override
+  Future<AppData> removeGroupMember(
+      String groupId, String requesterId, String memberId) async {
+    final g = _state.groupById(groupId);
+    g?.members.remove(memberId);
+    g?.admins.remove(memberId);
+    return _state;
+  }
+
+  @override
+  Future<AppData> assignGroupAdmin(
+      String groupId, String requesterId, String memberId) async {
+    final g = _state.groupById(groupId);
+    if (g != null && !g.admins.contains(memberId)) g.admins.add(memberId);
+    return _state;
+  }
+
+  @override
+  Future<AppData> revokeGroupAdmin(
+      String groupId, String requesterId, String memberId) async {
+    final g = _state.groupById(groupId);
+    g?.admins.remove(memberId);
+    return _state;
+  }
+
+  @override
   Future<void> logout() async {}
 
   @override
@@ -296,6 +332,101 @@ void main() {
       expect(restored.createdBy, 'alex');
       expect(restored.history.single.action, 'added Fuel');
       expect(restored.comments.single.message, 'hi');
+    });
+
+    test('group preserves admins through JSON', () {
+      final g = Group(
+          id: 'g', name: 'X', emoji: '👥', members: ['you', 'alex'], admins: ['alex']);
+      expect(Group.fromJson(g.toJson()).admins, ['alex']);
+    });
+
+    test('group without admins defaults to the first member', () {
+      final g = Group.fromJson(
+          {'id': 'g', 'name': 'X', 'emoji': '👥', 'members': ['you', 'alex']});
+      expect(g.admins, ['you']);
+      expect(g.isAdmin('you'), isTrue);
+      expect(g.isAdmin('alex'), isFalse);
+    });
+  });
+
+  group('Group roles & membership', () {
+    test('createGroup makes the creator the sole admin', () async {
+      final c = await _signedIn(_state());
+      final g = await c.createGroup('Cabin', '⛺');
+      expect(g.admins, ['you']);
+      expect(c.amIAdmin(g.id), isTrue);
+      expect(c.isAdmin(g.id, 'alex'), isFalse);
+    });
+
+    test('first member is admin by default on a group without an admins list',
+        () async {
+      final c = await _signedIn(_state());
+      expect(c.amIAdmin('trip'), isTrue); // 'you' is first member of 'trip'
+    });
+
+    test('assignAdmin then revokeAdmin toggles the role', () async {
+      final c = await _signedIn(_state());
+      await c.assignAdmin('trip', 'alex');
+      expect(c.isAdmin('trip', 'alex'), isTrue);
+      await c.revokeAdmin('trip', 'alex');
+      expect(c.isAdmin('trip', 'alex'), isFalse);
+    });
+
+    test('revokeAdmin throws on the last admin', () async {
+      final c = await _signedIn(_state());
+      expect(() => c.revokeAdmin('trip', 'you'), throwsStateError);
+    });
+
+    test('removeMemberFromGroup removes a settled member', () async {
+      final c = await _signedIn(_state());
+      final g = await c.createGroup('Duo', '👥', members: [
+        Member(id: 'alex', name: 'Alex', avatar: '🧑', color: '#10B981'),
+      ]);
+      expect(g.members.contains('alex'), isTrue);
+      await c.removeMemberFromGroup(g.id, 'alex');
+      expect(c.state!.groupById(g.id)!.members.contains('alex'), isFalse);
+    });
+
+    test('removeMemberFromGroup blocks a member with an outstanding balance',
+        () async {
+      final c = await _signedIn(_state());
+      await c.addExpense(Expense(
+        id: 'g-exp',
+        title: 'Cabin',
+        amount: 90,
+        paidBy: 'you',
+        participants: ['you', 'alex', 'maya'],
+        groupId: 'trip',
+        category: 'home',
+        date: DateTime(2026, 1, 1),
+      ));
+      expect(() => c.removeMemberFromGroup('trip', 'alex'), throwsStateError);
+    });
+
+    test('removeMemberFromGroup blocks removing the last admin', () async {
+      final c = await _signedIn(_state());
+      expect(() => c.removeMemberFromGroup('trip', 'you'), throwsStateError);
+    });
+
+    test('non-admins cannot manage members or roles', () async {
+      final c = await _signedIn(_state());
+      c.state!.groups.add(Group(
+        id: 'g2',
+        name: 'Others',
+        emoji: '👥',
+        members: ['you', 'alex'],
+        admins: ['alex'], // 'you' is only a member here
+      ));
+      expect(c.amIAdmin('g2'), isFalse);
+      expect(() => c.assignAdmin('g2', 'you'), throwsStateError);
+      expect(() => c.revokeAdmin('g2', 'alex'), throwsStateError);
+      expect(() => c.removeMemberFromGroup('g2', 'alex'), throwsStateError);
+      expect(
+        () => c.addMembersToGroup('g2', [
+          Member(id: 'maya', name: 'Maya', avatar: '👩', color: '#8B5CF6'),
+        ]),
+        throwsStateError,
+      );
     });
   });
 }

@@ -598,6 +598,21 @@ class ManageMembersSheet extends StatelessWidget {
   final AppController controller;
   final Group group;
 
+  void _snack(BuildContext context, String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  /// Wraps an admin action so permission/validation errors surface as a snack
+  /// instead of crashing the sheet.
+  Future<void> _run(BuildContext context, Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      if (context.mounted) {
+        _snack(context, e is StateError ? e.message : '$e');
+      }
+    }
+  }
+
   Future<void> _addFromDirectory(BuildContext context, Group current) async {
     final picked = await showMemberPicker(
       context,
@@ -605,9 +620,30 @@ class ManageMembersSheet extends StatelessWidget {
       excludeIds: current.members.toSet(),
       title: 'Add to ${current.name}',
     );
-    if (picked != null && picked.isNotEmpty) {
-      await controller.addMembersToGroup(current.id, picked);
-    }
+    if (picked == null || picked.isEmpty || !context.mounted) return;
+    await _run(context, () => controller.addMembersToGroup(current.id, picked));
+  }
+
+  Future<void> _confirmRemove(
+      BuildContext context, Group current, Person p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove member?'),
+        content: Text('${p.name} will be removed from ${current.name}.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    await _run(
+        context, () => controller.removeMemberFromGroup(current.id, p.id));
   }
 
   @override
@@ -617,8 +653,8 @@ class ManageMembersSheet extends StatelessWidget {
       builder: (context, _) {
         final data = controller.state!;
         final current = data.groupById(group.id) ?? group;
-        final nonMembers =
-            data.people.where((p) => !current.members.contains(p.id)).toList();
+        final amAdmin = controller.amIAdmin(current.id);
+        final theme = Theme.of(context);
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(
@@ -630,42 +666,85 @@ class ManageMembersSheet extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text('Members of ${current.name}',
-                        style: Theme.of(context).textTheme.titleLarge),
+                        style: theme.textTheme.titleLarge),
                   ),
-                  FilledButton.tonalIcon(
-                    onPressed: () => _addFromDirectory(context, current),
-                    icon: const Icon(Icons.person_add_alt, size: 18),
-                    label: const Text('Search'),
-                  ),
+                  if (amAdmin)
+                    FilledButton.tonalIcon(
+                      onPressed: () => _addFromDirectory(context, current),
+                      icon: const Icon(Icons.person_add_alt, size: 18),
+                      label: const Text('Add'),
+                    ),
                 ],
               ),
+              if (!amAdmin) ...[
+                const SizedBox(height: 4),
+                Text('Only group admins can add or remove members.',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: AppTheme.inkSoft)),
+              ],
               const SizedBox(height: 12),
               ...current.members.map((id) {
                 final p = data.personById(id)!;
+                final isMe = id == controller.myId;
+                final memberIsAdmin = current.isAdmin(id);
                 return ListTile(
+                  contentPadding: EdgeInsets.zero,
                   leading: PersonAvatar(person: p),
                   title: Text(p.name),
-                  trailing: id == controller.myId
-                      ? const Chip(label: Text('You'))
+                  subtitle: memberIsAdmin
+                      ? Text('Admin',
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: theme.colorScheme.primary))
                       : null,
+                  trailing: _memberTrailing(
+                    context,
+                    current,
+                    p,
+                    isMe: isMe,
+                    memberIsAdmin: memberIsAdmin,
+                    amAdmin: amAdmin,
+                  ),
                 );
               }),
-              if (nonMembers.isNotEmpty) ...[
-                const Divider(),
-                Text('Add member',
-                    style: Theme.of(context).textTheme.titleSmall),
-                ...nonMembers.map((p) => ListTile(
-                      leading: PersonAvatar(person: p),
-                      title: Text(p.name),
-                      trailing: const Icon(Icons.add_circle_outline),
-                      onTap: () =>
-                          controller.addMemberToGroup(current.id, p.id),
-                    )),
-              ],
             ],
           ),
         );
       },
+    );
+  }
+
+  /// Trailing widget for a member row: a "You" chip, and — for admins acting on
+  /// other members — a popup with role + removal actions.
+  Widget? _memberTrailing(
+    BuildContext context,
+    Group current,
+    Person p, {
+    required bool isMe,
+    required bool memberIsAdmin,
+    required bool amAdmin,
+  }) {
+    final youChip = isMe ? const Chip(label: Text('You')) : null;
+    // Admins manage other members; they can't act on themselves here.
+    if (!amAdmin || isMe) return youChip;
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert),
+      onSelected: (value) {
+        switch (value) {
+          case 'promote':
+            _run(context, () => controller.assignAdmin(current.id, p.id));
+          case 'demote':
+            _run(context, () => controller.revokeAdmin(current.id, p.id));
+          case 'remove':
+            _confirmRemove(context, current, p);
+        }
+      },
+      itemBuilder: (_) => [
+        if (memberIsAdmin)
+          const PopupMenuItem(value: 'demote', child: Text('Remove admin'))
+        else
+          const PopupMenuItem(value: 'promote', child: Text('Make admin')),
+        const PopupMenuItem(value: 'remove', child: Text('Remove from group')),
+      ],
     );
   }
 }

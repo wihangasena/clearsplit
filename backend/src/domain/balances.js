@@ -76,6 +76,15 @@ function rawBalances(state, groupId = null) {
 }
 
 /**
+ * A single person's multilateral net within a group, in integer cents.
+ * Zero means they are fully settled up in that group — used to decide whether a
+ * member may be removed without leaving orphaned debt.
+ */
+export function groupMemberNetCents(state, groupId, personId) {
+  return rawBalances(state, groupId)[personId] ?? 0;
+}
+
+/**
  * Pairwise net in cents between `me` and every other person.
  * Result[x] > 0 → x owes me; < 0 → I owe x.
  */

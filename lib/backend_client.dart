@@ -24,6 +24,14 @@ abstract interface class ClearSplitApi {
       String name, String email, String password);
   Future<List<Member>> searchMembers(String query, {String? excludeId});
   Future<AppData> syncGroup(String groupId, String requesterId);
+  Future<AppData> addGroupMember(
+      String groupId, String requesterId, Member member);
+  Future<AppData> removeGroupMember(
+      String groupId, String requesterId, String memberId);
+  Future<AppData> assignGroupAdmin(
+      String groupId, String requesterId, String memberId);
+  Future<AppData> revokeGroupAdmin(
+      String groupId, String requesterId, String memberId);
   Future<void> logout();
   Future<AppData> saveState(String userId, AppData state);
   Future<AppData> resetState(String userId);
@@ -156,6 +164,82 @@ class BackendClient implements ClearSplitApi {
     final body = await _send(
       () => _http.post(
         _uri('/groups/$groupId/sync'),
+        headers: _jsonHeaders,
+        body: jsonEncode({'requesterId': requesterId}),
+      ),
+    );
+    return AppData.fromJson(body['state'] as Map<String, dynamic>);
+  }
+
+  /// Adds [member] to a group (admin only) and returns the fanned-out state.
+  @override
+  Future<AppData> addGroupMember(
+    String groupId,
+    String requesterId,
+    Member member,
+  ) async {
+    final body = await _send(
+      () => _http.post(
+        _uri('/groups/$groupId/members'),
+        headers: _jsonHeaders,
+        body: jsonEncode({
+          'requesterId': requesterId,
+          'member': {
+            'id': member.id,
+            'name': member.name,
+            'avatar': member.avatar,
+            'color': member.color,
+          },
+        }),
+      ),
+    );
+    return AppData.fromJson(body['state'] as Map<String, dynamic>);
+  }
+
+  /// Removes [memberId] from a group (admin only).
+  @override
+  Future<AppData> removeGroupMember(
+    String groupId,
+    String requesterId,
+    String memberId,
+  ) async {
+    final body = await _send(
+      () => _http.delete(
+        _uri('/groups/$groupId/members/$memberId'),
+        headers: _jsonHeaders,
+        body: jsonEncode({'requesterId': requesterId}),
+      ),
+    );
+    return AppData.fromJson(body['state'] as Map<String, dynamic>);
+  }
+
+  /// Promotes [memberId] to admin (admin only).
+  @override
+  Future<AppData> assignGroupAdmin(
+    String groupId,
+    String requesterId,
+    String memberId,
+  ) async {
+    final body = await _send(
+      () => _http.put(
+        _uri('/groups/$groupId/admins/$memberId'),
+        headers: _jsonHeaders,
+        body: jsonEncode({'requesterId': requesterId}),
+      ),
+    );
+    return AppData.fromJson(body['state'] as Map<String, dynamic>);
+  }
+
+  /// Revokes [memberId]'s admin role (admin only).
+  @override
+  Future<AppData> revokeGroupAdmin(
+    String groupId,
+    String requesterId,
+    String memberId,
+  ) async {
+    final body = await _send(
+      () => _http.delete(
+        _uri('/groups/$groupId/admins/$memberId'),
         headers: _jsonHeaders,
         body: jsonEncode({'requesterId': requesterId}),
       ),

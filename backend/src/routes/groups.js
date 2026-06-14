@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError } from '../utils/AppError.js';
 import { requireBody, requireString, requirePositiveNumber } from '../middleware/validate.js';
-import { getState, fanOut } from '../db/stateStore.js';
+import { getState, saveState, fanOut } from '../db/stateStore.js';
 import {
   validateExpenseSplits,
   canModifyExpense,
@@ -11,6 +11,15 @@ import {
   describeExpenseChange,
   makeComment,
 } from '../domain/expenses.js';
+import {
+  isGroupAdmin,
+  addAdmin,
+  removeAdmin,
+  canRemoveMember,
+  canAssignAdmin,
+  canRevokeAdmin,
+} from '../domain/groups.js';
+import { groupMemberNetCents } from '../domain/balances.js';
 
 const router = Router();
 
@@ -21,6 +30,75 @@ async function groupMembers(requesterId, groupId) {
   const group = state.groups.find((g) => g.id === groupId);
   if (!group) throw new AppError(404, 'Group not found');
   return group.members;
+}
+
+/**
+ * Loads the requester's state + group and enforces admin permission. Throws 404
+ * when missing, 403 when the requester isn't a group admin. Returns
+ * `{ state, group }` so the caller can mutate the canonical group.
+ */
+async function authorizeAdmin(requesterId, groupId) {
+  const state = await getState(requesterId);
+  if (!state) throw new AppError(404, 'State not found');
+  const group = state.groups.find((g) => g.id === groupId);
+  if (!group) throw new AppError(404, 'Group not found');
+  if (!isGroupAdmin(group, requesterId)) {
+    throw new AppError(403, 'Only a group admin can manage members and roles');
+  }
+  return { state, group };
+}
+
+/**
+ * Fans the requester's canonical group (members **and** admins) + the member
+ * Person records out to every member's state, so each one converges. When
+ * [removedMemberId] is given, that user is also updated — the group is dropped
+ * from their own list. Persons are only *added* when missing, so a member's own
+ * edited profile is never clobbered. Returns the requester's updated state.
+ */
+async function propagateGroupMembership(requesterId, groupId, { removedMemberId = null } = {}) {
+  const state = await getState(requesterId);
+  if (!state) throw new AppError(404, 'State not found');
+  const group = state.groups.find((g) => g.id === groupId);
+  if (!group) throw new AppError(404, 'Group not found');
+
+  const canonicalGroup = {
+    id: group.id,
+    name: group.name,
+    emoji: group.emoji,
+    members: [...group.members],
+    admins: [...(group.admins ?? [])],
+  };
+  const memberPeople = group.members
+    .map((id) => state.people.find((p) => p.id === id))
+    .filter(Boolean)
+    .map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color }));
+
+  const targets = [...group.members];
+  if (removedMemberId && !targets.includes(removedMemberId)) targets.push(removedMemberId);
+
+  const updated = await fanOut(targets, requesterId, (s) => {
+    if (s.me === removedMemberId) {
+      // The removed member loses the group from their own ledger.
+      s.groups = s.groups.filter((g) => g.id !== groupId);
+      return s;
+    }
+    const existing = s.groups.find((g) => g.id === groupId);
+    if (existing) {
+      existing.members = [...canonicalGroup.members];
+      existing.admins = [...canonicalGroup.admins];
+    } else {
+      s.groups.push(structuredClone(canonicalGroup));
+    }
+    for (const person of memberPeople) {
+      if (!s.people.some((p) => p.id === person.id)) {
+        s.people.push({ ...person });
+      }
+    }
+    return s;
+  });
+
+  if (!updated) throw new AppError(404, 'State not found');
+  return updated;
 }
 
 /**
@@ -228,10 +306,10 @@ router.post(
 );
 
 // GRP-membership: propagate a group's current membership to every member's
-// state. The requester has already added the new member (+ their Person) to
-// their own state and saved it; this fans the canonical group and the member
-// Person records out so each member converges. Persons are only *added* when
-// missing, so a member's own edited profile is never clobbered.
+// state. The requester has already updated their own state and saved it; this
+// fans the canonical group (members + admins) and the member Person records out
+// so each member converges. Persons are only *added* when missing, so a
+// member's own edited profile is never clobbered.
 router.post(
   '/groups/:groupId/sync',
   asyncHandler(async (req, res) => {
@@ -239,42 +317,103 @@ router.post(
     const body = requireBody(req.body);
     const requesterId = requireString(body.requesterId, 'requesterId');
 
-    const state = await getState(requesterId);
-    if (!state) throw new AppError(404, 'State not found');
-    const group = state.groups.find((g) => g.id === groupId);
-    if (!group) throw new AppError(404, 'Group not found');
+    const updated = await propagateGroupMembership(requesterId, groupId);
+    res.json({ state: updated });
+  }),
+);
 
-    // Canonical group (plain copy) + the Person records for its members, taken
-    // from the requester's state (which the client just updated).
-    const canonicalGroup = {
-      id: group.id,
-      name: group.name,
-      emoji: group.emoji,
-      members: [...group.members],
-    };
-    const memberPeople = group.members
-      .map((id) => state.people.find((p) => p.id === id))
-      .filter(Boolean)
-      .map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color }));
+// GRP-02: add a member to a group (admin only) and fan out. The member's Person
+// record (from the directory) is registered on the requester's state first.
+router.post(
+  '/groups/:groupId/members',
+  asyncHandler(async (req, res) => {
+    const { groupId } = req.params;
+    const body = requireBody(req.body);
+    const requesterId = requireString(body.requesterId, 'requesterId');
+    const member = body.member;
+    if (!member || typeof member !== 'object') {
+      throw new AppError(400, 'Field "member" (object) is required');
+    }
+    const memberId = requireString(member.id, 'member.id');
 
-    const updated = await fanOut(group.members, requesterId, (s) => {
-      // Upsert the group: keep an existing copy's name/emoji, converge members.
-      const existing = s.groups.find((g) => g.id === groupId);
-      if (existing) {
-        existing.members = [...canonicalGroup.members];
-      } else {
-        s.groups.push(structuredClone(canonicalGroup));
-      }
-      // Add any missing member Person records (never overwrite existing ones).
-      for (const person of memberPeople) {
-        if (!s.people.some((p) => p.id === person.id)) {
-          s.people.push({ ...person });
-        }
-      }
-      return s;
-    });
+    const { state, group } = await authorizeAdmin(requesterId, groupId);
+    if (!group.members.includes(memberId)) group.members.push(memberId);
+    if (!state.people.some((p) => p.id === memberId)) {
+      state.people.push({
+        id: memberId,
+        name: member.name ?? memberId,
+        avatar: member.avatar ?? '🙂',
+        color: member.color ?? '#2563EB',
+      });
+    }
+    await saveState(requesterId, state);
 
-    if (!updated) throw new AppError(404, 'State not found');
+    const updated = await propagateGroupMembership(requesterId, groupId);
+    res.json({ state: updated });
+  }),
+);
+
+// GRP-02: remove a member from a group (admin only). Blocked when the member
+// still has an outstanding balance in the group or is the last admin. Fans out
+// to the remaining members and the removed member.
+router.delete(
+  '/groups/:groupId/members/:memberId',
+  asyncHandler(async (req, res) => {
+    const { groupId, memberId } = req.params;
+    const body = requireBody(req.body);
+    const requesterId = requireString(body.requesterId, 'requesterId');
+
+    const { state, group } = await authorizeAdmin(requesterId, groupId);
+    const balanceCents = groupMemberNetCents(state, groupId, memberId);
+    const check = canRemoveMember(group, memberId, balanceCents);
+    if (!check.valid) throw new AppError(check.error.includes('settled') ? 409 : 400, check.error);
+
+    group.members = group.members.filter((id) => id !== memberId);
+    group.admins = removeAdmin(group.admins ?? [], memberId);
+    await saveState(requesterId, state);
+
+    const updated = await propagateGroupMembership(requesterId, groupId, { removedMemberId: memberId });
+    res.json({ state: updated });
+  }),
+);
+
+// GRP-roles: promote a member to admin (admin only) and fan out.
+router.put(
+  '/groups/:groupId/admins/:memberId',
+  asyncHandler(async (req, res) => {
+    const { groupId, memberId } = req.params;
+    const body = requireBody(req.body);
+    const requesterId = requireString(body.requesterId, 'requesterId');
+
+    const { state, group } = await authorizeAdmin(requesterId, groupId);
+    const check = canAssignAdmin(group, memberId);
+    if (!check.valid) throw new AppError(400, check.error);
+
+    group.admins = addAdmin(group.admins ?? [], memberId);
+    await saveState(requesterId, state);
+
+    const updated = await propagateGroupMembership(requesterId, groupId);
+    res.json({ state: updated });
+  }),
+);
+
+// GRP-roles: revoke a member's admin role (admin only). Blocked when it would
+// leave the group with no admin. Fans out.
+router.delete(
+  '/groups/:groupId/admins/:memberId',
+  asyncHandler(async (req, res) => {
+    const { groupId, memberId } = req.params;
+    const body = requireBody(req.body);
+    const requesterId = requireString(body.requesterId, 'requesterId');
+
+    const { state, group } = await authorizeAdmin(requesterId, groupId);
+    const check = canRevokeAdmin(group, memberId);
+    if (!check.valid) throw new AppError(400, check.error);
+
+    group.admins = removeAdmin(group.admins ?? [], memberId);
+    await saveState(requesterId, state);
+
+    const updated = await propagateGroupMembership(requesterId, groupId);
     res.json({ state: updated });
   }),
 );

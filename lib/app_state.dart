@@ -26,22 +26,50 @@ class Person {
 }
 
 class Group {
-  Group({required this.id, required this.name, required this.emoji, required this.members});
+  Group({
+    required this.id,
+    required this.name,
+    required this.emoji,
+    required this.members,
+    List<String>? admins,
+  }) : admins = admins ?? (members.isEmpty ? [] : [members.first]);
 
   String id;
   String name;
   String emoji;
   List<String> members; // Person.id list
+  List<String> admins; // Person.id list — group admins (subset of members)
 
-  factory Group.fromJson(Map<String, dynamic> j) => Group(
-        id: j['id'] as String,
-        name: j['name'] as String,
-        emoji: (j['emoji'] ?? '👥') as String,
-        members: (j['members'] as List).cast<String>(),
-      );
+  /// True when [personId] is a group admin. Legacy groups without an explicit
+  /// admins list fall back to the first member, mirroring the backend's
+  /// `isGroupAdmin`.
+  bool isAdmin(String personId) {
+    if (admins.isEmpty) {
+      return members.isNotEmpty && members.first == personId;
+    }
+    return admins.contains(personId);
+  }
 
-  Map<String, dynamic> toJson() =>
-      {'id': id, 'name': name, 'emoji': emoji, 'members': members};
+  factory Group.fromJson(Map<String, dynamic> j) {
+    final members = (j['members'] as List).cast<String>();
+    final admins = (j['admins'] as List?)?.cast<String>() ??
+        (members.isEmpty ? <String>[] : [members.first]);
+    return Group(
+      id: j['id'] as String,
+      name: j['name'] as String,
+      emoji: (j['emoji'] ?? '👥') as String,
+      members: members,
+      admins: admins,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'emoji': emoji,
+        'members': members,
+        'admins': admins,
+      };
 }
 
 /// A single audit-log entry on an expense (who did what, and when).
@@ -504,17 +532,25 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// True when the signed-in user is an admin of group [groupId] (mirrors the
+  /// backend's `isGroupAdmin`).
+  bool amIAdmin(String groupId) => isAdmin(groupId, myId);
+
+  /// True when [personId] is an admin of group [groupId].
+  bool isAdmin(String groupId, String personId) {
+    final group = _state?.groupById(groupId);
+    return group?.isAdmin(personId) ?? false;
+  }
+
   /// True when the signed-in user may edit/delete [expense]: the creator, or a
-  /// group admin (first group member, mirroring the backend default).
+  /// group admin (mirroring the backend's `canModifyExpense`).
   bool canModifyExpense(Expense expense) {
     final state = _state;
     if (state == null) return false;
     if (myId == expense.createdBy) return true;
     final groupId = expense.groupId;
     if (groupId == null) return false;
-    final group = state.groupById(groupId);
-    if (group == null || group.members.isEmpty) return false;
-    return group.members.first == myId; // default admin
+    return amIAdmin(groupId);
   }
 
   String _describeChange(Expense before, Expense after) {
@@ -662,6 +698,7 @@ class AppController extends ChangeNotifier {
       name: name,
       emoji: emoji,
       members: memberIds,
+      admins: [state.me], // the creator becomes the group admin (GRP-01)
     );
     state.groups.add(group);
     notifyListeners();
@@ -670,36 +707,115 @@ class AppController extends ChangeNotifier {
     return group;
   }
 
+  /// Adds an existing person to a group (admin only). Group access changes are
+  /// authorized and fanned out by the backend.
   Future<void> addMemberToGroup(String groupId, String personId) async {
-    final group = _state?.groupById(groupId);
-    if (group == null || group.members.contains(personId)) return;
-    group.members.add(personId);
-    notifyListeners();
-    await _save();
-    await _syncGroup(groupId);
+    final state = _state;
+    final group = state?.groupById(groupId);
+    if (state == null || group == null || group.members.contains(personId)) {
+      return;
+    }
+    final person = state.personById(personId);
+    if (person == null) return;
+    await addMembersToGroup(groupId, [
+      Member(
+        id: person.id,
+        name: person.name,
+        avatar: person.avatar,
+        color: person.color,
+      ),
+    ]);
   }
 
-  /// Adds directory [members] (from search) to a group: registers any new
-  /// people locally, appends them to the group, persists, then fans out.
+  /// Adds directory [members] to a group (admin only), one fan-out per member.
+  /// Throws [StateError] when the signed-in user isn't a group admin.
   Future<void> addMembersToGroup(String groupId, List<Member> members) async {
     final state = _state;
     final group = state?.groupById(groupId);
     if (state == null || group == null || members.isEmpty) return;
-    var changed = false;
-    for (final m in members) {
-      if (!state.people.any((p) => p.id == m.id)) {
-        state.people.add(m.toPerson());
-        changed = true;
-      }
-      if (!group.members.contains(m.id)) {
-        group.members.add(m.id);
-        changed = true;
-      }
+    if (!amIAdmin(groupId)) {
+      throw StateError('Only a group admin can add members');
     }
-    if (!changed) return;
+    try {
+      for (final m in members) {
+        if (group.members.contains(m.id)) continue;
+        _state = await _api.addGroupMember(groupId, myId, m);
+      }
+      _lastError = null;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+    }
     notifyListeners();
-    await _save();
-    await _syncGroup(groupId);
+  }
+
+  /// Net balance (positive = they are owed) for [personId] within [groupId].
+  /// Used to block removing a member who isn't settled up.
+  double groupMemberBalance(String groupId, String personId) {
+    final state = _state;
+    if (state == null) return 0;
+    return _dollars(_rawBalances(state, groupId: groupId)[personId] ?? 0);
+  }
+
+  /// Removes [memberId] from a group (admin only). Rejects up front when the
+  /// member still has an outstanding balance in the group or is the last admin;
+  /// the backend enforces the same rules authoritatively.
+  Future<void> removeMemberFromGroup(String groupId, String memberId) async {
+    final group = _state?.groupById(groupId);
+    if (group == null || !group.members.contains(memberId)) return;
+    if (!amIAdmin(groupId)) {
+      throw StateError('Only a group admin can remove members');
+    }
+    if (groupMemberBalance(groupId, memberId) != 0) {
+      throw StateError(
+          'Member must be settled up in this group before they can be removed');
+    }
+    if (group.isAdmin(memberId) && group.admins.length <= 1) {
+      throw StateError(
+          'Promote another member to admin before removing the last admin');
+    }
+    try {
+      _state = await _api.removeGroupMember(groupId, myId, memberId);
+      _lastError = null;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+    }
+    notifyListeners();
+  }
+
+  /// Promotes [memberId] to admin (admin only).
+  Future<void> assignAdmin(String groupId, String memberId) async {
+    final group = _state?.groupById(groupId);
+    if (group == null || !group.members.contains(memberId)) return;
+    if (!amIAdmin(groupId)) {
+      throw StateError('Only a group admin can assign roles');
+    }
+    try {
+      _state = await _api.assignGroupAdmin(groupId, myId, memberId);
+      _lastError = null;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+    }
+    notifyListeners();
+  }
+
+  /// Revokes [memberId]'s admin role (admin only). Rejects up front when it
+  /// would leave the group with no admin.
+  Future<void> revokeAdmin(String groupId, String memberId) async {
+    final group = _state?.groupById(groupId);
+    if (group == null) return;
+    if (!amIAdmin(groupId)) {
+      throw StateError('Only a group admin can assign roles');
+    }
+    if (group.isAdmin(memberId) && group.admins.length <= 1) {
+      throw StateError('A group must keep at least one admin');
+    }
+    try {
+      _state = await _api.revokeGroupAdmin(groupId, myId, memberId);
+      _lastError = null;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+    }
+    notifyListeners();
   }
 
   /// Ensures [member] exists as a person in local state (so they can be picked

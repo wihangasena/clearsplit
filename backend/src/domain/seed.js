@@ -32,9 +32,9 @@ function people() {
 
 function groups() {
   return [
-    { id: 'beach-house', name: 'Beach House', emoji: '🏖️', members: ['you', 'alex', 'maya', 'jordan'] },
-    { id: 'apartment-crew', name: 'Apartment Crew', emoji: '🏠', members: ['you', 'alex', 'chloe'] },
-    { id: 'road-trip', name: 'Road Trip 2026', emoji: '🚗', members: ['you', 'maya', 'sam'] },
+    { id: 'beach-house', name: 'Beach House', emoji: '🏖️', members: ['you', 'alex', 'maya', 'jordan'], admins: ['you'] },
+    { id: 'apartment-crew', name: 'Apartment Crew', emoji: '🏠', members: ['you', 'alex', 'chloe'], admins: ['you'] },
+    { id: 'road-trip', name: 'Road Trip 2026', emoji: '🚗', members: ['you', 'maya', 'sam'], admins: ['you'] },
   ];
 }
 

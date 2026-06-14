@@ -38,6 +38,42 @@ class _FakeBackend implements ClearSplitApi {
   Future<AppData> syncGroup(String groupId, String requesterId) async => _state;
 
   @override
+  Future<AppData> addGroupMember(
+      String groupId, String requesterId, Member member) async {
+    final g = _state.groupById(groupId);
+    if (g != null && !g.members.contains(member.id)) g.members.add(member.id);
+    if (!_state.people.any((p) => p.id == member.id)) {
+      _state.people.add(member.toPerson());
+    }
+    return _state;
+  }
+
+  @override
+  Future<AppData> removeGroupMember(
+      String groupId, String requesterId, String memberId) async {
+    final g = _state.groupById(groupId);
+    g?.members.remove(memberId);
+    g?.admins.remove(memberId);
+    return _state;
+  }
+
+  @override
+  Future<AppData> assignGroupAdmin(
+      String groupId, String requesterId, String memberId) async {
+    final g = _state.groupById(groupId);
+    if (g != null && !g.admins.contains(memberId)) g.admins.add(memberId);
+    return _state;
+  }
+
+  @override
+  Future<AppData> revokeGroupAdmin(
+      String groupId, String requesterId, String memberId) async {
+    final g = _state.groupById(groupId);
+    g?.admins.remove(memberId);
+    return _state;
+  }
+
+  @override
   Future<void> logout() async {}
 
   @override
