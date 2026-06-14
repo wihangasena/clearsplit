@@ -1,0 +1,16 @@
+{
+  "name": "clearsplit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ClearSplit — Splitwise-style shared-expense tracker (Flutter + Node/MongoDB)",
+  "scripts": {
+    "backend": "npm --prefix backend start",
+    "backend:install": "npm --prefix backend install",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File tool/start.ps1",
+    "start:backend": "powershell -NoProfile -ExecutionPolicy Bypass -File tool/start.ps1 backend",
+    "start:frontend": "powershell -NoProfile -ExecutionPolicy Bypass -File tool/start.ps1 frontend",
+    "dev": "powershell -NoProfile -ExecutionPolicy Bypass -File tool/start.ps1",
+    "build": "flutter build web",
+    "test": "npm --prefix backend test && flutter test"
+  }
+}
