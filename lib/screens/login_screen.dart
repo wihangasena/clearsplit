@@ -15,6 +15,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -22,6 +23,7 @@ class _LoginScreenState extends State<LoginScreen> {
   List<DemoAccount> _accounts = [];
   bool _loading = false;
   bool _loadingAccounts = true;
+  bool _signUpMode = false;
   String? _error;
 
   @override
@@ -32,6 +34,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    _name.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
@@ -61,10 +64,38 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  Future<void> _signUp() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final ok = await widget.controller.register(
+      _name.text.trim(),
+      _email.text.trim(),
+      _password.text,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (!ok) _error = widget.controller.lastError ?? 'Sign-up failed';
+    });
+  }
+
   void _submitForm() {
     if (_formKey.currentState?.validate() ?? false) {
-      _signIn(_email.text.trim(), _password.text);
+      if (_signUpMode) {
+        _signUp();
+      } else {
+        _signIn(_email.text.trim(), _password.text);
+      }
     }
+  }
+
+  void _toggleMode() {
+    setState(() {
+      _signUpMode = !_signUpMode;
+      _error = null;
+    });
   }
 
   @override
@@ -106,7 +137,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         ?.copyWith(fontWeight: FontWeight.w800),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 4),
-                Text('Track shared expenses, settle up with ease.',
+                Text(
+                    _signUpMode
+                        ? 'Create an account to start splitting.'
+                        : 'Track shared expenses, settle up with ease.',
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: AppTheme.inkSoft),
                     textAlign: TextAlign.center),
@@ -115,6 +149,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   key: _formKey,
                   child: Column(
                     children: [
+                      if (_signUpMode) ...[
+                        TextFormField(
+                          controller: _name,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Name',
+                            prefixIcon: Icon(Icons.person_outline),
+                          ),
+                          validator: (v) => (v == null || v.trim().length < 2)
+                              ? 'Enter your name'
+                              : null,
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       TextFormField(
                         controller: _email,
                         keyboardType: TextInputType.emailAddress,
@@ -130,13 +178,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextFormField(
                         controller: _password,
                         obscureText: true,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Password',
-                          prefixIcon: Icon(Icons.lock_outline),
+                          helperText: _signUpMode ? 'At least 6 characters' : null,
+                          prefixIcon: const Icon(Icons.lock_outline),
                         ),
-                        validator: (v) => (v == null || v.isEmpty)
-                            ? 'Enter your password'
-                            : null,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Enter your password';
+                          if (_signUpMode && v.length < 6) {
+                            return 'At least 6 characters';
+                          }
+                          return null;
+                        },
                         onFieldSubmitted: (_) => _submitForm(),
                       ),
                     ],
@@ -156,9 +209,16 @@ class _LoginScreenState extends State<LoginScreen> {
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Sign in'),
+                      : Text(_signUpMode ? 'Create account' : 'Sign in'),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _loading ? null : _toggleMode,
+                  child: Text(_signUpMode
+                      ? 'Already have an account? Sign in'
+                      : "Don't have an account? Sign up"),
+                ),
+                const SizedBox(height: 16),
                 Row(children: [
                   const Expanded(child: Divider()),
                   Padding(

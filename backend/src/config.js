@@ -27,6 +27,7 @@ export const config = Object.freeze({
   mongoUri: required('MONGODB_URI'),
   mongoDb: optional('MONGO_DB', 'clearsplit'),
   mongoCollection: optional('MONGO_COLLECTION', 'app_states'),
+  mongoMembersCollection: optional('MONGO_MEMBERS_COLLECTION', 'members'),
   port: Number.parseInt(optional('BACKEND_PORT', '8081'), 10),
   host: optional('BACKEND_HOST', '0.0.0.0'),
   corsOrigin: optional('CORS_ORIGIN', '*'),

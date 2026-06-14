@@ -25,6 +25,19 @@ class _FakeBackend implements ClearSplitApi {
   }
 
   @override
+  Future<(DemoAccount, AppData)> register(
+      String name, String email, String password) async {
+    return login(email, password);
+  }
+
+  @override
+  Future<List<Member>> searchMembers(String query, {String? excludeId}) async =>
+      const [];
+
+  @override
+  Future<AppData> syncGroup(String groupId, String requesterId) async => _state;
+
+  @override
   Future<void> logout() async {}
 
   @override

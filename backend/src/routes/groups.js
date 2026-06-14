@@ -227,4 +227,56 @@ router.post(
   }),
 );
 
+// GRP-membership: propagate a group's current membership to every member's
+// state. The requester has already added the new member (+ their Person) to
+// their own state and saved it; this fans the canonical group and the member
+// Person records out so each member converges. Persons are only *added* when
+// missing, so a member's own edited profile is never clobbered.
+router.post(
+  '/groups/:groupId/sync',
+  asyncHandler(async (req, res) => {
+    const { groupId } = req.params;
+    const body = requireBody(req.body);
+    const requesterId = requireString(body.requesterId, 'requesterId');
+
+    const state = await getState(requesterId);
+    if (!state) throw new AppError(404, 'State not found');
+    const group = state.groups.find((g) => g.id === groupId);
+    if (!group) throw new AppError(404, 'Group not found');
+
+    // Canonical group (plain copy) + the Person records for its members, taken
+    // from the requester's state (which the client just updated).
+    const canonicalGroup = {
+      id: group.id,
+      name: group.name,
+      emoji: group.emoji,
+      members: [...group.members],
+    };
+    const memberPeople = group.members
+      .map((id) => state.people.find((p) => p.id === id))
+      .filter(Boolean)
+      .map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, color: p.color }));
+
+    const updated = await fanOut(group.members, requesterId, (s) => {
+      // Upsert the group: keep an existing copy's name/emoji, converge members.
+      const existing = s.groups.find((g) => g.id === groupId);
+      if (existing) {
+        existing.members = [...canonicalGroup.members];
+      } else {
+        s.groups.push(structuredClone(canonicalGroup));
+      }
+      // Add any missing member Person records (never overwrite existing ones).
+      for (const person of memberPeople) {
+        if (!s.people.some((p) => p.id === person.id)) {
+          s.people.push({ ...person });
+        }
+      }
+      return s;
+    });
+
+    if (!updated) throw new AppError(404, 'State not found');
+    res.json({ state: updated });
+  }),
+);
+
 export default router;

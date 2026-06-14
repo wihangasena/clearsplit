@@ -103,3 +103,25 @@ export function seedForAccount(accountId) {
     settlements: [],
   };
 }
+
+/**
+ * Produces an empty starter state for a freshly registered member: just
+ * themselves, no demo world. They build up their ledger by adding real members
+ * (searched from the directory) to groups and expenses.
+ */
+export function seedForNewMember(member) {
+  return {
+    me: member.id,
+    people: [
+      {
+        id: member.id,
+        name: member.name,
+        avatar: member.avatar ?? '🙂',
+        color: member.color ?? '#2563EB',
+      },
+    ],
+    groups: [],
+    expenses: [],
+    settlements: [],
+  };
+}

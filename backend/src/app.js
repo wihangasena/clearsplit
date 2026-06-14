@@ -4,6 +4,7 @@ import { notFound, errorHandler } from './middleware/errorHandler.js';
 import healthRoutes from './routes/health.js';
 import accountRoutes from './routes/accounts.js';
 import authRoutes from './routes/auth.js';
+import memberRoutes from './routes/members.js';
 import stateRoutes from './routes/state.js';
 import groupRoutes from './routes/groups.js';
 import profileRoutes from './routes/profile.js';
@@ -21,6 +22,7 @@ export function createApp() {
   app.use(healthRoutes);
   app.use(accountRoutes);
   app.use(authRoutes);
+  app.use(memberRoutes);
   app.use(stateRoutes);
   app.use(groupRoutes);
   app.use(profileRoutes);

@@ -348,6 +348,36 @@ class DemoAccount {
       );
 }
 
+/// A directory entry returned by member search — someone who can sign in and
+/// be added to groups/expenses (a demo account or a registered member).
+class Member {
+  Member({
+    required this.id,
+    required this.name,
+    required this.avatar,
+    required this.color,
+    this.email = '',
+  });
+
+  final String id;
+  final String name;
+  final String avatar;
+  final String color;
+  final String email;
+
+  factory Member.fromJson(Map<String, dynamic> j) => Member(
+        id: j['id'] as String,
+        name: (j['name'] ?? '') as String,
+        avatar: (j['avatar'] ?? '🙂') as String,
+        color: (j['color'] ?? '#2563EB') as String,
+        email: (j['email'] ?? '') as String,
+      );
+
+  /// The [Person] record to store in app state when this member is added.
+  Person toPerson() =>
+      Person(id: id, name: name, avatar: avatar, color: color);
+}
+
 // ============================================================================
 // AppController — all business logic lives here, not in widgets (NFR-05).
 // ============================================================================
@@ -381,6 +411,22 @@ class AppController extends ChangeNotifier {
   Future<bool> signIn(String email, String password) async {
     try {
       final (account, state) = await _api.login(email, password);
+      _activeAccount = account;
+      _state = state;
+      _lastError = null;
+      notifyListeners();
+      return true;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Registers a new member and signs them straight in on success.
+  Future<bool> register(String name, String email, String password) async {
+    try {
+      final (account, state) = await _api.register(name, email, password);
       _activeAccount = account;
       _state = state;
       _lastError = null;
@@ -593,20 +639,34 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Group> createGroup(String name, String emoji) async {
+  /// Creates a group, optionally seeding it with directory [members] (people
+  /// found via search). Any new people are added to local state, then the
+  /// membership is fanned out so each member converges on the group.
+  Future<Group> createGroup(
+    String name,
+    String emoji, {
+    List<Member> members = const [],
+  }) async {
     final state = _state;
     if (state == null) {
       throw StateError('Not signed in');
     }
+    for (final m in members) {
+      if (!state.people.any((p) => p.id == m.id)) {
+        state.people.add(m.toPerson());
+      }
+    }
+    final memberIds = <String>{state.me, ...members.map((m) => m.id)}.toList();
     final group = Group(
       id: 'grp-${DateTime.now().millisecondsSinceEpoch}',
       name: name,
       emoji: emoji,
-      members: [state.me],
+      members: memberIds,
     );
     state.groups.add(group);
     notifyListeners();
     await _save();
+    await _syncGroup(group.id);
     return group;
   }
 
@@ -616,6 +676,64 @@ class AppController extends ChangeNotifier {
     group.members.add(personId);
     notifyListeners();
     await _save();
+    await _syncGroup(groupId);
+  }
+
+  /// Adds directory [members] (from search) to a group: registers any new
+  /// people locally, appends them to the group, persists, then fans out.
+  Future<void> addMembersToGroup(String groupId, List<Member> members) async {
+    final state = _state;
+    final group = state?.groupById(groupId);
+    if (state == null || group == null || members.isEmpty) return;
+    var changed = false;
+    for (final m in members) {
+      if (!state.people.any((p) => p.id == m.id)) {
+        state.people.add(m.toPerson());
+        changed = true;
+      }
+      if (!group.members.contains(m.id)) {
+        group.members.add(m.id);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    notifyListeners();
+    await _save();
+    await _syncGroup(groupId);
+  }
+
+  /// Ensures [member] exists as a person in local state (so they can be picked
+  /// as a participant on a non-group expense), persisting if newly added.
+  Future<void> ensurePerson(Member member) async {
+    final state = _state;
+    if (state == null || state.people.any((p) => p.id == member.id)) return;
+    state.people.add(member.toPerson());
+    notifyListeners();
+    await _save();
+  }
+
+  /// Searches the member directory, excluding the signed-in user.
+  Future<List<Member>> searchMembers(String query) async {
+    try {
+      final results = await _api.searchMembers(query, excludeId: myId);
+      _lastError = null;
+      return results;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+      return const [];
+    }
+  }
+
+  /// Best-effort fan-out of a group's membership to all members' states. The
+  /// local state is already saved, so a failure here only skips propagation.
+  Future<void> _syncGroup(String groupId) async {
+    try {
+      _state = await _api.syncGroup(groupId, myId);
+      _lastError = null;
+    } on BackendClientException catch (e) {
+      _lastError = e.message;
+    }
+    notifyListeners();
   }
 
   // ---- Balances (pure; mirror backend balances.js) -----------------------

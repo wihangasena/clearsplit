@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/member_picker.dart';
 
 // ============================================================================
 // Public entry points (REQUIREMENTS §8 modal sheets).
@@ -350,7 +352,18 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                     setState(() => _splitMethod = s.first),
               ),
               const SizedBox(height: 12),
-              Text('Participants', style: theme.textTheme.titleSmall),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Participants', style: theme.textTheme.titleSmall),
+                  if (_groupId == null)
+                    TextButton.icon(
+                      onPressed: _addParticipant,
+                      icon: const Icon(Icons.person_add_alt, size: 18),
+                      label: const Text('Add someone'),
+                    ),
+                ],
+              ),
               ..._candidatePeople.map(_participantTile),
               const SizedBox(height: 12),
               Row(
@@ -424,6 +437,23 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
     );
   }
 
+  /// Searches the member directory, adds the chosen people to local state, and
+  /// marks them as participants on this (non-group) expense.
+  Future<void> _addParticipant() async {
+    final picked = await showMemberPicker(
+      context,
+      widget.controller,
+      excludeIds: _candidatePeople.toSet(),
+      title: 'Add participant',
+    );
+    if (picked == null || picked.isEmpty) return;
+    for (final m in picked) {
+      await widget.controller.ensurePerson(m);
+      _participants.add(m.id);
+    }
+    if (mounted) setState(() {});
+  }
+
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -451,6 +481,7 @@ class CreateGroupSheet extends StatefulWidget {
 class _CreateGroupSheetState extends State<CreateGroupSheet> {
   final _name = TextEditingController();
   String _emoji = '👥';
+  final List<Member> _members = [];
   static const _emojiChoices = ['👥', '🏖️', '🏠', '🚗', '✈️', '🎉', '⛺', '🍽️'];
 
   @override
@@ -459,9 +490,22 @@ class _CreateGroupSheetState extends State<CreateGroupSheet> {
     super.dispose();
   }
 
+  Future<void> _pickMembers() async {
+    final picked = await showMemberPicker(
+      context,
+      widget.controller,
+      excludeIds: {widget.controller.myId, ..._members.map((m) => m.id)},
+      title: 'Add members',
+    );
+    if (picked != null && picked.isNotEmpty) {
+      setState(() => _members.addAll(picked));
+    }
+  }
+
   Future<void> _create() async {
     if (_name.text.trim().isEmpty) return;
-    await widget.controller.createGroup(_name.text.trim(), _emoji);
+    await widget.controller
+        .createGroup(_name.text.trim(), _emoji, members: _members);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -501,6 +545,37 @@ class _CreateGroupSheetState extends State<CreateGroupSheet> {
               );
             }).toList(),
           ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Members', style: theme.textTheme.titleSmall),
+              TextButton.icon(
+                onPressed: _pickMembers,
+                icon: const Icon(Icons.person_add_alt, size: 18),
+                label: const Text('Add'),
+              ),
+            ],
+          ),
+          Text("You're added automatically.",
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: AppTheme.inkSoft)),
+          if (_members.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _members
+                  .map((m) => Chip(
+                        avatar:
+                            Text(m.avatar, style: const TextStyle(fontSize: 16)),
+                        label: Text(m.name),
+                        onDeleted: () =>
+                            setState(() => _members.removeWhere((x) => x.id == m.id)),
+                      ))
+                  .toList(),
+            ),
+          ],
           const SizedBox(height: 20),
           FilledButton(onPressed: _create, child: const Text('Create')),
         ],
@@ -523,6 +598,18 @@ class ManageMembersSheet extends StatelessWidget {
   final AppController controller;
   final Group group;
 
+  Future<void> _addFromDirectory(BuildContext context, Group current) async {
+    final picked = await showMemberPicker(
+      context,
+      controller,
+      excludeIds: current.members.toSet(),
+      title: 'Add to ${current.name}',
+    );
+    if (picked != null && picked.isNotEmpty) {
+      await controller.addMembersToGroup(current.id, picked);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -538,8 +625,20 @@ class ManageMembersSheet extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Members of ${current.name}',
-                  style: Theme.of(context).textTheme.titleLarge),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text('Members of ${current.name}',
+                        style: Theme.of(context).textTheme.titleLarge),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _addFromDirectory(context, current),
+                    icon: const Icon(Icons.person_add_alt, size: 18),
+                    label: const Text('Search'),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
               ...current.members.map((id) {
                 final p = data.personById(id)!;

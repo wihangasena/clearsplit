@@ -61,6 +61,11 @@ Four demo accounts, password **`demo123`** (tap a tile on the login screen):
 | maya@clearsplit.app  | Maya   |
 | jordan@clearsplit.app| Jordan |
 
+Or **Sign up** to register a real member. Registered members start with an empty
+ledger and can be found by anyone via member search when creating a group, adding
+a participant to an expense, or managing group members. Adding a member fans the
+group out to their account, so they see it on their next sign-in.
+
 ---
 
 ## Configuration
@@ -95,8 +100,11 @@ flutter run -d chrome --dart-define=BACKEND_BASE_URL=http://127.0.0.1:8081
 |--------|-------------------------------------------------|----------------------------------|
 | GET    | `/health`                                       | Health check                     |
 | GET    | `/accounts`                                     | Demo accounts                    |
+| GET    | `/members?q=&excludeId=`                         | Search member directory          |
 | POST   | `/auth/login`                                   | Sign in (+ seed on first login)  |
+| POST   | `/auth/register`                                | Register a new member            |
 | POST   | `/auth/logout`                                  | No-op logout                     |
+| POST   | `/groups/:groupId/sync`                         | Fan out group membership         |
 | GET    | `/state/:userId`                                | Fetch persisted state            |
 | PUT    | `/state/:userId`                                | Overwrite state                  |
 | POST   | `/state/:userId/reset`                          | Re-seed to demo data             |

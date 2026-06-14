@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import { connect, close } from './db/client.js';
+import { ensureMemberIndexes } from './db/memberStore.js';
 import { createApp } from './app.js';
 
 /**
@@ -9,6 +10,7 @@ import { createApp } from './app.js';
 async function main() {
   try {
     await connect();
+    await ensureMemberIndexes();
     console.log(`✓ Connected to MongoDB (db: ${config.mongoDb})`);
   } catch (err) {
     console.error('✗ Failed to connect to MongoDB:', err.message);

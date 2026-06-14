@@ -20,6 +20,10 @@ class BackendClientException implements Exception {
 abstract interface class ClearSplitApi {
   Future<List<DemoAccount>> fetchAccounts();
   Future<(DemoAccount, AppData)> login(String email, String password);
+  Future<(DemoAccount, AppData)> register(
+      String name, String email, String password);
+  Future<List<Member>> searchMembers(String query, {String? excludeId});
+  Future<AppData> syncGroup(String groupId, String requesterId);
   Future<void> logout();
   Future<AppData> saveState(String userId, AppData state);
   Future<AppData> resetState(String userId);
@@ -115,6 +119,48 @@ class BackendClient implements ClearSplitApi {
       DemoAccount.fromJson(body['account'] as Map<String, dynamic>),
       AppData.fromJson(body['state'] as Map<String, dynamic>),
     );
+  }
+
+  /// Registers a new member and returns `(account, state)`, signed-in-ready.
+  @override
+  Future<(DemoAccount, AppData)> register(
+      String name, String email, String password) async {
+    final body = await _send(
+      () => _http.post(
+        _uri('/auth/register'),
+        headers: _jsonHeaders,
+        body: jsonEncode({'name': name, 'email': email, 'password': password}),
+      ),
+    );
+    return (
+      DemoAccount.fromJson(body['account'] as Map<String, dynamic>),
+      AppData.fromJson(body['state'] as Map<String, dynamic>),
+    );
+  }
+
+  /// Searches the member directory (demo accounts + registered members).
+  @override
+  Future<List<Member>> searchMembers(String query, {String? excludeId}) async {
+    final params = <String, String>{'q': query};
+    if (excludeId != null) params['excludeId'] = excludeId;
+    final body = await _send(
+      () => _http.get(_uri('/members').replace(queryParameters: params)),
+    );
+    final list = (body['members'] as List).cast<Map<String, dynamic>>();
+    return list.map(Member.fromJson).toList();
+  }
+
+  /// Propagates a group's current membership to all members' states.
+  @override
+  Future<AppData> syncGroup(String groupId, String requesterId) async {
+    final body = await _send(
+      () => _http.post(
+        _uri('/groups/$groupId/sync'),
+        headers: _jsonHeaders,
+        body: jsonEncode({'requesterId': requesterId}),
+      ),
+    );
+    return AppData.fromJson(body['state'] as Map<String, dynamic>);
   }
 
   @override
