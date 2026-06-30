@@ -284,6 +284,64 @@ class Settlement {
       };
 }
 
+/// A single entry in the activity feed: an expense added, edited, deleted, or
+/// marked settled. Mirrors the backend's append-only `activity` log, fanned out
+/// to every group member so each user sees the records relevant to them.
+/// [title]/[amount] are snapshots taken at event time, so a *deleted* expense
+/// still renders in the feed after the expense record itself is gone.
+class ActivityEvent {
+  ActivityEvent({
+    required this.id,
+    required this.type,
+    required this.actor,
+    required this.timestamp,
+    this.groupId,
+    this.expenseId,
+    this.title,
+    this.amount,
+    this.description = '',
+  });
+
+  static const typeAdded = 'expense_added';
+  static const typeEdited = 'expense_edited';
+  static const typeDeleted = 'expense_deleted';
+  static const typeSettled = 'expense_settled';
+
+  final String id;
+  final String type;
+  final String actor; // Person.id who performed the action
+  final String? groupId;
+  final String? expenseId;
+  final String? title; // expense title snapshot
+  final double? amount; // expense amount snapshot
+  final String description; // human-readable detail (used for edits)
+  final DateTime timestamp;
+
+  factory ActivityEvent.fromJson(Map<String, dynamic> j) => ActivityEvent(
+        id: j['id'] as String,
+        type: j['type'] as String,
+        actor: j['actor'] as String,
+        groupId: j['groupId'] as String?,
+        expenseId: j['expenseId'] as String?,
+        title: j['title'] as String?,
+        amount: (j['amount'] as num?)?.toDouble(),
+        description: (j['description'] ?? '') as String,
+        timestamp: DateTime.parse(j['timestamp'] as String),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'type': type,
+        'actor': actor,
+        'groupId': groupId,
+        'expenseId': expenseId,
+        'title': title,
+        'amount': amount,
+        'description': description,
+        'timestamp': timestamp.toIso8601String(),
+      };
+}
+
 class AppData {
   AppData({
     required this.me,
@@ -291,13 +349,15 @@ class AppData {
     required this.groups,
     required this.expenses,
     required this.settlements,
-  });
+    List<ActivityEvent>? activity,
+  }) : activity = activity ?? [];
 
   String me; // current user's Person.id
   List<Person> people;
   List<Group> groups;
   List<Expense> expenses;
   List<Settlement> settlements;
+  List<ActivityEvent> activity; // append-only audit feed
 
   Person? personById(String id) {
     for (final p in people) {
@@ -327,6 +387,9 @@ class AppData {
         settlements: ((j['settlements'] ?? []) as List)
             .map((e) => Settlement.fromJson(e as Map<String, dynamic>))
             .toList(),
+        activity: ((j['activity'] ?? []) as List)
+            .map((e) => ActivityEvent.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 
   Map<String, dynamic> toJson() => {
@@ -335,6 +398,7 @@ class AppData {
         'groups': groups.map((e) => e.toJson()).toList(),
         'expenses': expenses.map((e) => e.toJson()).toList(),
         'settlements': settlements.map((e) => e.toJson()).toList(),
+        'activity': activity.map((e) => e.toJson()).toList(),
       };
 }
 
@@ -519,6 +583,8 @@ class AppController extends ChangeNotifier {
         _state = await _api.createGroupExpense(groupId, myId, expense);
       } else {
         state.expenses.add(expense);
+        state.activity
+            .add(_expenseActivity(ActivityEvent.typeAdded, expense, idSuffix: 'add'));
         _state = await _api.saveState(state.me, state);
       }
       _lastError = null;
@@ -553,7 +619,10 @@ class AppController extends ChangeNotifier {
     return amIAdmin(groupId);
   }
 
-  String _describeChange(Expense before, Expense after) {
+  /// The change clause between two expense snapshots with no "edited X" prefix,
+  /// e.g. `amount from 90.0 to 120.0` (mirrors the backend's
+  /// `summarizeExpenseChanges`). Empty when nothing tracked changed.
+  String _summarizeChange(Expense before, Expense after) {
     final parts = <String>[];
     if (before.title != after.title) {
       parts.add('title from "${before.title}" to "${after.title}"');
@@ -567,10 +636,36 @@ class AppController extends ChangeNotifier {
     if (before.splitMethod != after.splitMethod) {
       parts.add('split from ${before.splitMethod} to ${after.splitMethod}');
     }
-    return parts.isEmpty
-        ? 'edited ${after.title}'
-        : 'edited ${after.title} ${parts.join(', ')}';
+    return parts.join(', ');
   }
+
+  String _describeChange(Expense before, Expense after) {
+    final summary = _summarizeChange(before, after);
+    return summary.isEmpty
+        ? 'edited ${after.title}'
+        : 'edited ${after.title} $summary';
+  }
+
+  /// Builds an activity event for [expense] performed by the signed-in user.
+  /// Used on the friend-expense path; group expenses get their events from the
+  /// backend fan-out instead. [idSuffix] keeps event ids unique per action.
+  ActivityEvent _expenseActivity(
+    String type,
+    Expense expense, {
+    required String idSuffix,
+    String description = '',
+  }) =>
+      ActivityEvent(
+        id: 'act-${expense.id}-$idSuffix',
+        type: type,
+        actor: myId,
+        groupId: expense.groupId,
+        expenseId: expense.id,
+        title: expense.title,
+        amount: expense.amount,
+        description: description,
+        timestamp: DateTime.now(),
+      );
 
   /// Edits an expense (creator/admin only, validated), recording a history
   /// entry. [updated] carries the new field values for the same expense id.
@@ -614,6 +709,12 @@ class AppController extends ChangeNotifier {
             ),
           ];
         state.expenses[idx] = updated;
+        state.activity.add(_expenseActivity(
+          ActivityEvent.typeEdited,
+          updated,
+          idSuffix: 'edit-${DateTime.now().microsecondsSinceEpoch}',
+          description: _summarizeChange(original, updated),
+        ));
         _state = await _api.saveState(state.me, state);
       }
       _lastError = null;
@@ -636,6 +737,11 @@ class AppController extends ChangeNotifier {
         _state = await _api.deleteGroupExpense(groupId, expense.id, myId);
       } else {
         state.expenses.removeWhere((e) => e.id == expense.id);
+        state.activity.add(_expenseActivity(
+          ActivityEvent.typeDeleted,
+          expense,
+          idSuffix: 'del-${DateTime.now().microsecondsSinceEpoch}',
+        ));
         _state = await _api.saveState(state.me, state);
       }
       _lastError = null;
@@ -999,6 +1105,11 @@ class AppController extends ChangeNotifier {
       } else {
         // Non-group expense: settle locally and persist own state.
         expense.settled = true;
+        state.activity.add(_expenseActivity(
+          ActivityEvent.typeSettled,
+          expense,
+          idSuffix: 'settle-${DateTime.now().microsecondsSinceEpoch}',
+        ));
         _state = await _api.saveState(state.me, state);
       }
       _lastError = null;

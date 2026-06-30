@@ -296,6 +296,69 @@ void main() {
     });
   });
 
+  group('Activity feed', () {
+    test('addExpense (friend) logs an "added" activity event', () async {
+      final c = await _signedIn(_state());
+      await c.addExpense(_friendExpense());
+      final a = c.state!.activity.single;
+      expect(a.type, ActivityEvent.typeAdded);
+      expect(a.actor, 'you');
+      expect(a.expenseId, 'e1');
+      expect(a.title, 'Fuel');
+    });
+
+    test('editExpense (friend) logs an "edited" event describing the change',
+        () async {
+      final c = await _signedIn(_state());
+      await c.addExpense(_friendExpense());
+      await c.editExpense(_friendExpense()..amount = 120);
+      final edits =
+          c.state!.activity.where((a) => a.type == ActivityEvent.typeEdited);
+      expect(edits.length, 1);
+      expect(edits.single.description, contains('amount from 90.0 to 120.0'));
+    });
+
+    test('deleteExpense (friend) logs a "deleted" event that survives removal',
+        () async {
+      final c = await _signedIn(_state());
+      await c.addExpense(_friendExpense());
+      await c.deleteExpense(c.state!.expenses.single);
+      expect(c.state!.expenses, isEmpty);
+      final del = c.state!.activity
+          .where((a) => a.type == ActivityEvent.typeDeleted)
+          .single;
+      // The snapshot persists even though the expense record is gone.
+      expect(del.title, 'Fuel');
+      expect(del.amount, 90);
+    });
+
+    test('markSettled (friend) logs a "settled" event', () async {
+      final c = await _signedIn(_state());
+      await c.addExpense(_friendExpense());
+      await c.markSettled(c.state!.expenses.single);
+      final settled = c.state!.activity
+          .where((a) => a.type == ActivityEvent.typeSettled)
+          .single;
+      expect(settled.expenseId, 'e1');
+    });
+
+    test('AppData round-trips activity through JSON', () {
+      final data = _state()
+        ..activity.add(ActivityEvent(
+          id: 'a1',
+          type: ActivityEvent.typeAdded,
+          actor: 'you',
+          expenseId: 'e1',
+          title: 'Fuel',
+          amount: 90,
+          timestamp: DateTime(2026, 1, 1),
+        ));
+      final restored = AppData.fromJson(data.toJson());
+      expect(restored.activity.single.title, 'Fuel');
+      expect(restored.activity.single.type, ActivityEvent.typeAdded);
+    });
+  });
+
   group('Comments', () {
     test('addComment appends a comment without changing balances', () async {
       final c = await _signedIn(_state());

@@ -108,10 +108,11 @@ export function makeHistoryEntry(user, action, at = new Date()) {
 }
 
 /**
- * Human-readable summary of what changed between two expense snapshots,
- * e.g. `edited Dinner amount from 2500 to 3000`.
+ * The change clause between two expense snapshots with no "edited X" prefix,
+ * e.g. `amount from 2500 to 3000`, or `''` when nothing tracked changed. Used
+ * directly as an activity event's description.
  */
-export function describeExpenseChange(before, after) {
+export function summarizeExpenseChanges(before, after) {
   const parts = [];
   if (before.title !== after.title) {
     parts.push(`title from "${before.title}" to "${after.title}"`);
@@ -125,8 +126,17 @@ export function describeExpenseChange(before, after) {
   if (before.splitMethod !== after.splitMethod) {
     parts.push(`split from ${before.splitMethod} to ${after.splitMethod}`);
   }
+  return parts.join(', ');
+}
+
+/**
+ * Human-readable summary of what changed between two expense snapshots,
+ * e.g. `edited Dinner amount from 2500 to 3000`.
+ */
+export function describeExpenseChange(before, after) {
+  const summary = summarizeExpenseChanges(before, after);
   const name = after.title ?? before.title;
-  return parts.length === 0 ? `edited ${name}` : `edited ${name} ${parts.join(', ')}`;
+  return summary ? `edited ${name} ${summary}` : `edited ${name}`;
 }
 
 /** A comment on an expense. Comments never affect balances. */

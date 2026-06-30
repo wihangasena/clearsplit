@@ -1,4 +1,5 @@
 import { DEMO_ACCOUNTS, EXTRA_CONTACTS } from './demoAccounts.js';
+import { makeActivityEvent, ACTIVITY_TYPES } from './activity.js';
 
 /**
  * Builds the shared demo world (people, groups, expenses) used to seed a fresh
@@ -93,14 +94,34 @@ function expenses() {
   ];
 }
 
+/** One "added" activity event per seeded expense, so a fresh demo account's
+ * Activity feed is populated from day one (matching the seeded TODAY/EARLIER
+ * spread). */
+function activityForExpenses(list) {
+  return list.map((e) =>
+    makeActivityEvent({
+      id: `act-${e.id}-add`,
+      type: ACTIVITY_TYPES.EXPENSE_ADDED,
+      actor: e.createdBy,
+      groupId: e.groupId,
+      expenseId: e.id,
+      title: e.title,
+      amount: e.amount,
+      at: e.date,
+    }),
+  );
+}
+
 /** Produces a complete AppData snapshot for the given account id. */
 export function seedForAccount(accountId) {
+  const list = expenses();
   return {
     me: accountId,
     people: people(),
     groups: groups(),
-    expenses: expenses(),
+    expenses: list,
     settlements: [],
+    activity: activityForExpenses(list),
   };
 }
 
@@ -123,5 +144,6 @@ export function seedForNewMember(member) {
     groups: [],
     expenses: [],
     settlements: [],
+    activity: [],
   };
 }

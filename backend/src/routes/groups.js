@@ -9,8 +9,10 @@ import {
   pickEditableFields,
   makeHistoryEntry,
   describeExpenseChange,
+  summarizeExpenseChanges,
   makeComment,
 } from '../domain/expenses.js';
+import { makeActivityEvent, appendActivity, ACTIVITY_TYPES } from '../domain/activity.js';
 import {
   isGroupAdmin,
   addAdmin,
@@ -164,11 +166,27 @@ router.post(
     const body = requireBody(req.body);
     const requesterId = requireString(body.requesterId, 'requesterId');
 
-    const members = await groupMembers(requesterId, groupId);
-    const updated = await fanOut(members, requesterId, (state) => {
-      const expense = state.expenses.find((e) => e.id === expenseId);
+    const state = await getState(requesterId);
+    if (!state) throw new AppError(404, 'State not found');
+    const group = state.groups.find((g) => g.id === groupId);
+    if (!group) throw new AppError(404, 'Group not found');
+    const target = state.expenses.find((e) => e.id === expenseId);
+
+    const event = makeActivityEvent({
+      id: `act-${expenseId}-settle-${Date.now()}`,
+      type: ACTIVITY_TYPES.EXPENSE_SETTLED,
+      actor: requesterId,
+      groupId,
+      expenseId,
+      title: target?.title ?? null,
+      amount: target?.amount ?? null,
+    });
+
+    const updated = await fanOut(group.members, requesterId, (s) => {
+      const expense = s.expenses.find((e) => e.id === expenseId);
       if (expense) expense.settled = true;
-      return state;
+      appendActivity(s, event);
+      return s;
     });
 
     if (!updated) throw new AppError(404, 'State not found');
@@ -204,11 +222,22 @@ router.post(
       comments: [],
     };
 
+    const event = makeActivityEvent({
+      id: `act-${record.id}-add`,
+      type: ACTIVITY_TYPES.EXPENSE_ADDED,
+      actor: requesterId,
+      groupId,
+      expenseId: record.id,
+      title: record.title,
+      amount: record.amount,
+    });
+
     const members = await groupMembers(requesterId, groupId);
     const updated = await fanOut(members, requesterId, (state) => {
       if (!state.expenses.some((e) => e.id === record.id)) {
         state.expenses.push(structuredClone(record));
       }
+      appendActivity(state, event);
       return state;
     });
 
@@ -238,6 +267,17 @@ router.put(
     if (!check.valid) throw new AppError(400, check.error);
 
     const description = describeExpenseChange(existing, merged);
+    const event = makeActivityEvent({
+      id: `act-${expenseId}-edit-${Date.now()}`,
+      type: ACTIVITY_TYPES.EXPENSE_EDITED,
+      actor: requesterId,
+      groupId,
+      expenseId,
+      title: merged.title,
+      amount: merged.amount,
+      description: summarizeExpenseChanges(existing, merged),
+    });
+
     const members = await groupMembers(requesterId, groupId);
     const updated = await fanOut(members, requesterId, (state) => {
       const e = state.expenses.find((x) => x.id === expenseId);
@@ -246,6 +286,7 @@ router.put(
         e.createdBy = e.createdBy ?? e.paidBy;
         (e.history ??= []).push(makeHistoryEntry(requesterId, description));
       }
+      appendActivity(state, event);
       return state;
     });
 
@@ -262,11 +303,21 @@ router.delete(
     const body = requireBody(req.body);
     const requesterId = requireString(body.requesterId, 'requesterId');
 
-    await authorizeExpense(requesterId, groupId, expenseId);
+    const { expense } = await authorizeExpense(requesterId, groupId, expenseId);
+    const event = makeActivityEvent({
+      id: `act-${expenseId}-del-${Date.now()}`,
+      type: ACTIVITY_TYPES.EXPENSE_DELETED,
+      actor: requesterId,
+      groupId,
+      expenseId,
+      title: expense.title,
+      amount: expense.amount,
+    });
 
     const members = await groupMembers(requesterId, groupId);
     const updated = await fanOut(members, requesterId, (state) => {
       state.expenses = state.expenses.filter((e) => e.id !== expenseId);
+      appendActivity(state, event);
       return state;
     });
 

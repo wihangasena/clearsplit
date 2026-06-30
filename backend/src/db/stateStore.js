@@ -1,6 +1,7 @@
 import { getDb } from './client.js';
 import { config } from '../config.js';
 import { normalizeLegacyNames } from '../domain/demoAccounts.js';
+import { backfillActivity } from '../domain/activity.js';
 
 /**
  * Data-access layer for per-user app state. Documents are
@@ -17,8 +18,10 @@ export async function getState(userId) {
   if (!doc) return null;
   const hadLegacyName = (doc.state?.people ?? []).some((p) => p.name === 'You');
   const state = normalizeLegacyNames(doc.state);
-  // Persist the one-time rename so it sticks for every future read/viewer.
-  if (hadLegacyName) await saveState(userId, state);
+  const backfilled = backfillActivity(state);
+  // Persist one-time migrations (legacy rename, activity backfill) so they
+  // stick for every future read/viewer.
+  if (hadLegacyName || backfilled) await saveState(userId, state);
   return state;
 }
 
@@ -38,7 +41,11 @@ export async function getStates(userIds) {
     .find({ _id: { $in: userIds } })
     .toArray();
   const map = new Map();
-  for (const doc of docs) map.set(doc._id, normalizeLegacyNames(doc.state));
+  for (const doc of docs) {
+    const state = normalizeLegacyNames(doc.state);
+    backfillActivity(state); // fan-out targets converge with their full feed
+    map.set(doc._id, state);
+  }
   return map;
 }
 

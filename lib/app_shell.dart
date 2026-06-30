@@ -295,22 +295,13 @@ class ActivityScreen extends StatelessWidget {
 
     final entries = <_ActivityEntry>[];
 
-    for (final e in data.expenses) {
-      final payer = data.personById(e.paidBy);
-      final actor = e.paidBy == me ? 'You' : (payer?.name ?? 'Someone');
-      final myShare = e.getParticipantShare(me);
-      final double effect = e.paidBy == me ? (e.amount - myShare) : -myShare;
+    // Expense events come from the append-only activity log (added / edited /
+    // deleted / settled), so edits and deletions are visible — not just the
+    // current amount — and a deleted expense still leaves a trace.
+    for (final a in data.activity) {
       entries.add(_ActivityEntry(
-        date: e.date,
-        build: (ctx) => ListTile(
-          leading: payer == null
-              ? _CircleIcon(icon: Icons.receipt, color: AppTheme.brand)
-              : PersonAvatar(person: payer, radius: 22),
-          title: Text('$actor added "${e.title}"'),
-          subtitle: Text(
-              '${categoryEmoji(e.category)} ${money(e.amount)}${e.settled ? ' · settled' : ''}'),
-          trailing: _effectLabel(ctx, effect),
-        ),
+        date: a.timestamp,
+        build: (ctx) => _activityTile(ctx, data, me, a),
       ));
     }
 
@@ -360,6 +351,71 @@ class ActivityScreen extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  Expense? _expenseById(AppData data, String? id) {
+    if (id == null) return null;
+    for (final e in data.expenses) {
+      if (e.id == id) return e;
+    }
+    return null;
+  }
+
+  /// Renders one activity-log entry, branching on the event type so an edit,
+  /// delete, or settle reads differently from a plain "added".
+  Widget _activityTile(
+      BuildContext context, AppData data, String me, ActivityEvent a) {
+    final actorPerson = data.personById(a.actor);
+    final actor = a.actor == me ? 'You' : (actorPerson?.name ?? 'Someone');
+    final title = a.title ?? 'an expense';
+    final live = _expenseById(data, a.expenseId);
+
+    switch (a.type) {
+      case ActivityEvent.typeAdded:
+        final myShare = live?.getParticipantShare(me) ?? 0;
+        final double effect = live == null
+            ? 0
+            : (live.paidBy == me ? (live.amount - myShare) : -myShare);
+        return ListTile(
+          leading: actorPerson == null
+              ? _CircleIcon(icon: Icons.receipt, color: AppTheme.brand)
+              : PersonAvatar(person: actorPerson, radius: 22),
+          title: Text('$actor added "$title"'),
+          subtitle: Text(live != null
+              ? '${categoryEmoji(live.category)} ${money(live.amount)}${live.settled ? ' · settled' : ''}'
+              : (a.amount != null ? money(a.amount!) : 'Expense')),
+          trailing: live == null ? null : _effectLabel(context, effect),
+        );
+      case ActivityEvent.typeEdited:
+        return ListTile(
+          leading:
+              _CircleIcon(icon: Icons.edit_outlined, color: AppTheme.brand),
+          title: Text('$actor edited "$title"'),
+          subtitle:
+              Text(a.description.isEmpty ? 'Updated expense' : a.description),
+        );
+      case ActivityEvent.typeDeleted:
+        return ListTile(
+          leading:
+              _CircleIcon(icon: Icons.delete_outline, color: AppTheme.negative),
+          title: Text('$actor deleted "$title"'),
+          subtitle:
+              Text(a.amount != null ? money(a.amount!) : 'Expense removed'),
+        );
+      case ActivityEvent.typeSettled:
+        return ListTile(
+          leading: _CircleIcon(
+              icon: Icons.check_circle_outline, color: AppTheme.positive),
+          title: Text('$actor marked "$title" settled'),
+          subtitle: const Text('Expense settled'),
+        );
+      default:
+        return ListTile(
+          leading: _CircleIcon(icon: Icons.history, color: AppTheme.brand),
+          title: Text('$actor updated "$title"'),
+          subtitle: a.description.isEmpty ? null : Text(a.description),
+        );
+    }
   }
 
   Widget _activityGroup(BuildContext context, List<_ActivityEntry> items) {
