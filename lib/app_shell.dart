@@ -310,8 +310,10 @@ class ActivityScreen extends StatelessWidget {
       final to = data.personById(s.to);
       final actor = s.from == me ? 'You' : (from?.name ?? 'Someone');
       final target = s.to == me ? 'you' : (to?.name ?? 'someone');
+      // Cash-flow direction: money you received is green (+), money you paid
+      // out is red (−).
       final double effect =
-          s.from == me ? s.amount : (s.to == me ? -s.amount : 0);
+          s.to == me ? s.amount : (s.from == me ? -s.amount : 0);
       entries.add(_ActivityEntry(
         date: s.date,
         build: (ctx) => ListTile(

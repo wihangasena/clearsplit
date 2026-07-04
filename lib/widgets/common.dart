@@ -121,20 +121,26 @@ class BalanceLabel extends StatelessWidget {
         : (owesMe ? 'owes you' : 'you owe');
 
     if (compact) {
-      // Directional so a member who owes vs. one who gets money back can't be
-      // misread — the bare number alone looked like everyone had the same sign.
+      // Words and colors both follow the signed-in user's money, not the
+      // row's member (owner preference): green "owes you" = money coming to
+      // you, red "you pay" = money leaving you. Amounts are still each
+      // member's net with the group.
       final String text;
       if (settled) {
         text = 'settled up';
-      } else if (owesMe) {
-        text = '${isSelf ? 'you get back' : 'gets back'} ${money(net)}';
+      } else if (isSelf) {
+        text = '${owesMe ? 'you get back' : 'you owe'} ${money(net)}';
       } else {
-        text = '${isSelf ? 'you owe' : 'owes'} ${money(net)}';
+        text = '${owesMe ? 'you pay' : 'owes you'} ${money(net)}';
       }
+      final towardMe = isSelf ? owesMe : !owesMe;
+      final compactColor = settled
+          ? theme.colorScheme.outline
+          : (towardMe ? const Color(0xFF10B981) : const Color(0xFFEF4444));
       return Text(
         text,
         style: theme.textTheme.titleSmall?.copyWith(
-          color: color,
+          color: compactColor,
           fontWeight: FontWeight.w600,
         ),
       );
