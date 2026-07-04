@@ -270,6 +270,60 @@ void main() {
       expect(c.state!.expenses.first.settled, isTrue);
     });
 
+    test(
+        'computeGroupSettlements collapses a transitive chain to one payment '
+        '(proposal example)', () async {
+      // A owes B 500 and B owes C 500 → single suggestion: A → C 500.
+      final chainState = AppData(
+        me: 'a',
+        people: [
+          Person(id: 'a', name: 'A', avatar: '🅰️', color: '#2563EB'),
+          Person(id: 'b', name: 'B', avatar: '🅱️', color: '#10B981'),
+          Person(id: 'c', name: 'C', avatar: '©️', color: '#8B5CF6'),
+        ],
+        groups: [
+          Group(id: 'g', name: 'G', emoji: '👥', members: ['a', 'b', 'c']),
+        ],
+        expenses: [
+          // B paid 500 solely for A → A owes B 500.
+          Expense(
+            id: 'e1',
+            title: 'Lunch',
+            amount: 500,
+            paidBy: 'b',
+            participants: ['a'],
+            groupId: 'g',
+            category: 'food',
+            date: DateTime(2026, 1, 1),
+            splitMethod: 'amount',
+            splits: {'a': 500},
+          ),
+          // C paid 500 solely for B → B owes C 500.
+          Expense(
+            id: 'e2',
+            title: 'Tickets',
+            amount: 500,
+            paidBy: 'c',
+            participants: ['b'],
+            groupId: 'g',
+            category: 'fun',
+            date: DateTime(2026, 1, 2),
+            splitMethod: 'amount',
+            splits: {'b': 500},
+          ),
+        ],
+        settlements: [],
+      );
+      final c = AppController(api: _FakeBackend(chainState));
+      await c.signIn('a@clearsplit.app', 'demo123');
+      final payments = c.computeGroupSettlements('g');
+      // B nets to zero and drops out — exactly one payment, A → C 500.
+      expect(payments.keys.toList(), ['a']);
+      expect(payments['a']!.length, 1);
+      expect(payments['a']!.single.to, 'c');
+      expect(payments['a']!.single.amount, 500);
+    });
+
     test('computeGroupSettlements simplifies to minimal transfers', () async {
       final c = AppController(api: _FakeBackend(_sampleState()));
       await c.signIn('you@clearsplit.app', 'demo123');

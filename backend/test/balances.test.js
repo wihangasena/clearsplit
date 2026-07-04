@@ -117,6 +117,37 @@ test('computeGroupSettlements: minimal transfers to the creditor', () => {
   assert.equal(flat.reduce((s, p) => s + p.amount, 0), 60);
 });
 
+test('computeGroupSettlements: transitive chain collapses to one payment (proposal example)', () => {
+  // A owes B 500 and B owes C 500 → the app should suggest a single
+  // A → C 500 payment; B nets to zero and drops out entirely.
+  const state = {
+    me: 'a',
+    people: [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'B' },
+      { id: 'c', name: 'C' },
+    ],
+    groups: [{ id: 'g', name: 'G', emoji: '👥', members: ['a', 'b', 'c'] }],
+    expenses: [
+      // B paid 500 solely for A → A owes B 500.
+      {
+        id: 'e1', title: 'Lunch', amount: 500, paidBy: 'b', participants: ['a'],
+        groupId: 'g', category: 'food', date: '2026-01-01T00:00:00.000Z',
+        splitMethod: 'amount', splits: { a: 500 }, settled: false,
+      },
+      // C paid 500 solely for B → B owes C 500.
+      {
+        id: 'e2', title: 'Tickets', amount: 500, paidBy: 'c', participants: ['b'],
+        groupId: 'g', category: 'fun', date: '2026-01-02T00:00:00.000Z',
+        splitMethod: 'amount', splits: { b: 500 }, settled: false,
+      },
+    ],
+    settlements: [],
+  };
+  const payments = computeGroupSettlements(state, 'g');
+  assert.deepEqual(payments, { a: [{ to: 'c', amount: 500 }] });
+});
+
 test('computeGroupSettlements: empty when fully settled', () => {
   const state = tripState();
   state.expenses[0].settled = true;
