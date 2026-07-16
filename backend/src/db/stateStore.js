@@ -1,6 +1,6 @@
 import { getDb } from './client.js';
 import { config } from '../config.js';
-import { normalizeLegacyNames } from '../domain/demoAccounts.js';
+import { normalizeLegacyNames, normalizeDeprecatedDemoContacts } from '../domain/demoAccounts.js';
 import { backfillActivity } from '../domain/activity.js';
 
 /**
@@ -18,10 +18,11 @@ export async function getState(userId) {
   if (!doc) return null;
   const hadLegacyName = (doc.state?.people ?? []).some((p) => p.name === 'You');
   const state = normalizeLegacyNames(doc.state);
+  const deprecatedContactsMigrated = normalizeDeprecatedDemoContacts(state);
   const backfilled = backfillActivity(state);
   // Persist one-time migrations (legacy rename, activity backfill) so they
   // stick for every future read/viewer.
-  if (hadLegacyName || backfilled) await saveState(userId, state);
+  if (hadLegacyName || deprecatedContactsMigrated || backfilled) await saveState(userId, state);
   return state;
 }
 
@@ -43,7 +44,9 @@ export async function getStates(userIds) {
   const map = new Map();
   for (const doc of docs) {
     const state = normalizeLegacyNames(doc.state);
-    backfillActivity(state); // fan-out targets converge with their full feed
+    const deprecatedContactsMigrated = normalizeDeprecatedDemoContacts(state);
+    const backfilled = backfillActivity(state); // fan-out targets converge with their full feed
+    if (deprecatedContactsMigrated || backfilled) await saveState(doc._id, state);
     map.set(doc._id, state);
   }
   return map;

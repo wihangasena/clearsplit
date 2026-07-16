@@ -12,9 +12,9 @@ function tripState() {
   return {
     me: 'you',
     people: [
-      { id: 'you', name: 'Riley' },
-      { id: 'alex', name: 'Alex' },
-      { id: 'maya', name: 'Maya' },
+      { id: 'you', name: 'Chenuri' },
+      { id: 'alex', name: 'Ushani' },
+      { id: 'maya', name: 'Nimsara' },
     ],
     groups: [{ id: 'trip', name: 'Trip', emoji: '🚗', members: ['you', 'alex', 'maya'] }],
     expenses: [
@@ -158,7 +158,7 @@ test('computeGroupSettlements: empty when fully settled', () => {
 test('seedForAccount: produces the full demo world', () => {
   const state = seedForAccount('you');
   assert.equal(state.me, 'you');
-  assert.equal(state.people.length, 6);
+  assert.equal(state.people.length, 4);
   assert.equal(state.groups.length, 3);
   assert.equal(state.expenses.length, 10);
   assert.deepEqual(state.settlements, []);

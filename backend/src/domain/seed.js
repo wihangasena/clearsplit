@@ -1,4 +1,4 @@
-import { DEMO_ACCOUNTS, EXTRA_CONTACTS } from './demoAccounts.js';
+import { DEMO_ACCOUNTS } from './demoAccounts.js';
 import { makeActivityEvent, ACTIVITY_TYPES } from './activity.js';
 
 /**
@@ -22,20 +22,14 @@ function people() {
     avatar: a.avatar,
     color: a.color,
   }));
-  const contacts = EXTRA_CONTACTS.map((c) => ({
-    id: c.id,
-    name: c.name,
-    avatar: c.avatar,
-    color: c.color,
-  }));
-  return [...fromAccounts, ...contacts];
+  return fromAccounts;
 }
 
 function groups() {
   return [
     { id: 'beach-house', name: 'Beach House', emoji: '🏖️', members: ['you', 'alex', 'maya', 'jordan'], admins: ['you'] },
-    { id: 'apartment-crew', name: 'Apartment Crew', emoji: '🏠', members: ['you', 'alex', 'chloe'], admins: ['you'] },
-    { id: 'road-trip', name: 'Road Trip 2026', emoji: '🚗', members: ['you', 'maya', 'sam'], admins: ['you'] },
+    { id: 'apartment-crew', name: 'Apartment Crew', emoji: '🏠', members: ['you', 'alex', 'jordan'], admins: ['you'] },
+    { id: 'road-trip', name: 'Road Trip 2026', emoji: '🚗', members: ['you', 'maya', 'jordan'], admins: ['you'] },
   ];
 }
 
@@ -80,13 +74,13 @@ function expenses() {
     expense({ id: 'exp-3', title: 'Gas for the drive', amount: 60, paidBy: 'maya', participants: ['you', 'maya', 'jordan'], groupId: 'beach-house', category: 'transport', date: daysAgo(3) }),
 
     // Apartment Crew (one percentage split)
-    expense({ id: 'exp-4', title: 'Internet bill', amount: 75, paidBy: 'you', participants: ['you', 'alex', 'chloe'], groupId: 'apartment-crew', category: 'utilities', date: daysAgo(1) }),
-    expense({ id: 'exp-5', title: 'Cleaning supplies', amount: 45, paidBy: 'chloe', participants: ['you', 'alex', 'chloe'], groupId: 'apartment-crew', category: 'home', date: daysAgo(5), splitMethod: 'percentage', splits: { you: 40, alex: 40, chloe: 20 } }),
+    expense({ id: 'exp-4', title: 'Internet bill', amount: 75, paidBy: 'you', participants: ['you', 'alex', 'jordan'], groupId: 'apartment-crew', category: 'utilities', date: daysAgo(1) }),
+    expense({ id: 'exp-5', title: 'Cleaning supplies', amount: 45, paidBy: 'jordan', participants: ['you', 'alex', 'jordan'], groupId: 'apartment-crew', category: 'home', date: daysAgo(5), splitMethod: 'percentage', splits: { you: 40, alex: 40, jordan: 20 } }),
 
     // Road Trip (one exact-amount split)
-    expense({ id: 'exp-6', title: 'Fuel', amount: 90, paidBy: 'you', participants: ['you', 'maya', 'sam'], groupId: 'road-trip', category: 'transport', date: daysAgo(0) }),
-    expense({ id: 'exp-7', title: 'Hotel night', amount: 240, paidBy: 'maya', participants: ['you', 'maya', 'sam'], groupId: 'road-trip', category: 'travel', date: daysAgo(4), splitMethod: 'amount', splits: { you: 80, maya: 80, sam: 80 } }),
-    expense({ id: 'exp-8', title: 'Road snacks', amount: 30, paidBy: 'sam', participants: ['you', 'maya', 'sam'], groupId: 'road-trip', category: 'food', date: daysAgo(6) }),
+    expense({ id: 'exp-6', title: 'Fuel', amount: 90, paidBy: 'you', participants: ['you', 'maya', 'jordan'], groupId: 'road-trip', category: 'transport', date: daysAgo(0) }),
+    expense({ id: 'exp-7', title: 'Hotel night', amount: 240, paidBy: 'maya', participants: ['you', 'maya', 'jordan'], groupId: 'road-trip', category: 'travel', date: daysAgo(4), splitMethod: 'amount', splits: { you: 80, maya: 80, jordan: 80 } }),
+    expense({ id: 'exp-8', title: 'Road snacks', amount: 30, paidBy: 'jordan', participants: ['you', 'maya', 'jordan'], groupId: 'road-trip', category: 'food', date: daysAgo(6) }),
 
     // Non-group (friend) expenses
     expense({ id: 'exp-9', title: 'Movie tickets', amount: 36, paidBy: 'you', participants: ['you', 'alex'], category: 'entertainment', date: daysAgo(1) }),

@@ -1,3 +1,4 @@
+
 # ClearSplit — Product & Technical Requirements
 
 > **Document type:** Combined BA + Developer Reference  
@@ -598,27 +599,24 @@ Seeding is triggered by `AppData.seedForAccount(account)` when a user logs in fo
 
 | Email | Display Name | Avatar | Color |
 |-------|-------------|--------|-------|
-| you@clearsplit.app | You | 🙂 | #2563EB |
-| alex@clearsplit.app | Alex | 🧑 | #10B981 |
-| maya@clearsplit.app | Maya | 👩 | #8B5CF6 |
-| jordan@clearsplit.app | Jordan | 🧔 | #EF4444 |
+| chenuri@gmail.com | Chenuri | 🙂 | #2563EB |
+| ushani@gmail.com | Ushani | 🧑 | #10B981 |
+| nimsara@gmail.com | Nimsara | 👩 | #8B5CF6 |
+| janidu@gmail.com | Janidu | 🧔 | #EF4444 |
 
 Password for all: **demo123**
-
-Additional contacts (not sign-in accounts): Chloe, Sam.
 
 ### Seeded Groups
 
 | Name | Emoji | Members |
 |------|-------|---------|
 | Beach House | 🏖️ | you, alex, maya, jordan |
-| Apartment Crew | 🏠 | you, alex, chloe |
-| Road Trip 2026 | 🚗 | you, maya, sam |
+| Apartment Crew | 🏠 | you, alex, jordan |
+| Road Trip 2026 | 🚗 | you, maya, jordan |
 
 ### Seeded Expenses
 
-- 8 shared group expenses (various groups, categories, payers)
-- 2 non-group expenses shared directly with a friend
+- 10 shared expenses across the seeded groups and direct friend splits
 
 ---
 
